@@ -1,0 +1,92 @@
+def gitUrl = ""
+def credentialID = "" // it is store secret on Manage Credentials
+def branch = ""
+def email = ""
+def env = ""
+def username = "" // it is store secret on Manage Credentials
+def password = "" // it is store secret on Manage Credentials
+def dockerRegistry = ""
+def AWS_ACCESS_KEY_ID = "" // it is store secret on Manage Credentials
+def AWS_SECRET_ACCESS_KEY = "" // it is store secret on Manage Credentials
+def AWS_REGION = "" // it is store secret on Manage Credentials
+def eks_cluster_name = ""
+def namespace = ""
+
+pipeline {
+    agent any
+
+    environment {
+        PATH = "${env.PATH}"
+    }
+
+    stages {
+        stage('Source Code Checkout') {
+            steps {
+                checkout([$class: 'GitSCM',
+                    branches: [[name: "${branch}"]],
+                    doGenerateSubmoduleConfigurations: false,
+                    extensions: [], gitTool: 'jgitapache',
+                    submoduleCfg: [],
+                    userRemoteConfigs: [[
+                        credentialsId: "${credentialID}",
+                        url: "${gitUrl}"]]
+                ])
+            }
+        }
+
+        stage('Build Source'){
+            steps {
+                sh 'npm install' //example source using NodeJS for build BE api
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    sh './build.sh'
+                }
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    sh 'docker login -u ${username} -p ${password} ${dockerRegistry}'
+                    sh 'docker push api-${env}:latest'
+                }
+            }
+        }
+
+        stage('Configure AWS CLI') {
+            steps {
+                // Configure AWS CLI using AWS credentials stored in Jenkins
+                sh 'aws configure set aws_access_key_id ${AWS_ACCESS_KEY_ID}'
+                sh 'aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}'
+                sh 'aws configure set default.region ${AWS_REGION}'
+            }
+        }
+
+        stage('Deploy on EKS') {
+            sh 'aws eks --region ${AWS_REGION} update-kubeconfig --name ${eks_cluster_name}'
+            sh 'kubectl set image deployment/deployment-name containe-name=api-${env}:latest -n ${namespace}' // deployment-name and container-name is set up on your EKS
+        }
+    }
+    
+    post {
+        success {
+            updateGitlabCommitStatus name: 'JenkinsCD', state: 'success'
+            emailext(attachLog: false,
+                body: 'Please check it out, link : $BUILD_URL',
+                subject: "SUCCESS :Job ${env.JOB_NAME} - Build# ${env.BUILD_NUMBER}",
+                to: "${email}")
+        }
+
+        failure {
+            updateGitlabCommitStatus name: 'JenkinsCD', state: 'failed'
+            emailext(attachLog: true,
+                body: 'Please check it out , link : $BUILD_URL',
+                subject: "FAILED :Job ${env.JOB_NAME} - Build# ${env.BUILD_NUMBER}",
+                to: "${email}")
+        }
+    }
+}

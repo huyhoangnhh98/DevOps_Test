@@ -1,0 +1,77 @@
+def gitUrl = ""
+def credentialID = "" // it is store secret on Manage Credentials
+def branch = ""
+def email = ""
+def s3Bucket = "" // it is store secret on Manage Credentials
+def sourceDirectory = "dist"
+def distributionId = "" // it is store secret on Manage Credentials
+def AWS_ACCESS_KEY_ID = "" // it is store secret on Manage Credentials
+def AWS_SECRET_ACCESS_KEY = "" // it is store secret on Manage Credentials
+def AWS_REGION = "" // it is store secret on Manage Credentials
+
+pipeline {
+    agent any
+
+    stages {
+        stage('Source Code Checkout') {
+            steps {
+                checkout([$class: 'GitSCM',
+                    branches: [[name: "${branch}"]],
+                    doGenerateSubmoduleConfigurations: false,
+                    extensions: [], gitTool: 'jgitapache',
+                    submoduleCfg: [],
+                    userRemoteConfigs: [[
+                        credentialsId: "${credentialID}",
+                        url: "${gitUrl}"]]
+                ])
+            }
+        }
+
+        stage('Run Build folder'){
+            steps {
+                sh './build.sh'
+            }
+        }
+        stage('Configure AWS CLI') {
+            steps {
+                sh 'aws configure set aws_access_key_id ${AWS_ACCESS_KEY_ID}'
+                sh 'aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}'
+                sh 'aws configure set default.region ${AWS_REGION}'
+            }
+        }
+
+        stage('Push source to S3') {
+            steps {
+                script {
+                    sh "aws s3 sync ${sourceDirectory} s3://${s3Bucket}/"
+                }
+            }
+        }
+
+        stage('Clear Cache Cloudfront') {
+            steps {
+                script {
+                    sh "aws cloudfront create-invalidation --distribution-id ${distributionId} --paths '/*'"
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            updateGitlabCommitStatus name: 'JenkinsCD', state: 'success'
+            emailext(attachLog: false,
+                body: 'Please check it out, link : $BUILD_URL',
+                subject: "SUCCESS :Job ${env.JOB_NAME} - Build# ${env.BUILD_NUMBER}",
+                to: "${email}")
+        }
+
+        failure {
+            updateGitlabCommitStatus name: 'JenkinsCD', state: 'failed'
+            emailext(attachLog: true,
+                body: 'Please check it out , link : $BUILD_URL',
+                subject: "FAILED :Job ${env.JOB_NAME} - Build# ${env.BUILD_NUMBER}",
+                to: "${email}")
+        }
+    }
+}

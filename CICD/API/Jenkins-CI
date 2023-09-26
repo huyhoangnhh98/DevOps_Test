@@ -1,0 +1,106 @@
+def gitUrl = ""
+def credentialID = "" // it is store secret on Manage Credentials
+def branch = ""
+def email = ""
+def sonarPath = ""
+def env = ""
+def username = "" // it is store secret on Manage Credentials
+def password = "" // it is store secret on Manage Credentials
+def dockerRegistry = ""
+def sonarToken = "" // it is store secret on Manage Credentials
+def sonarHost = ""
+def project = ""
+
+pipeline {
+    agent any
+
+    environment {
+        SONAR_HOME = "${sonarPath}"
+        PATH = "${env.SONAR_HOME}/bin:${env.PATH}"
+    }
+
+    stages {
+        stage('Source Code Checkout') {
+            steps {
+                checkout([$class: 'GitSCM',
+                    branches: [[name: "${branch}"]],
+                    doGenerateSubmoduleConfigurations: false,
+                    extensions: [], gitTool: 'jgitapache',
+                    submoduleCfg: [],
+                    userRemoteConfigs: [[
+                        credentialsId: "${credentialID}",
+                        url: "${gitUrl}"]]
+                ])
+            }
+        }
+        
+        stage('Build Source'){
+            steps {
+                sh 'npm install' //example source using NodeJS for build BE api
+            }
+        }
+        
+        stage('Unit Test') {
+            steps {
+                sh 'npm test' //example source using NodeJS for build BE api
+            }
+        }
+        
+        stage('Sonar Scan Code') {
+            // example using Sonar to scan code
+            steps {
+                sh "sonar-scanner " +
+                    "-Dsonar.login=${sonarToken} " +
+                    "-Dsonar.host.url=${sonarHost} " +
+                    "-Dsonar.projectKey=${project} " +
+                    "-Dsonar.projectName=${project} " +
+                    "-Dsonar.sourceEncoding=UTF-8 " +
+                    "-Dsonar.branch.name=${branch} " +
+                    "-Dsonar.sources=. " +
+                    "-Dsonar.projectVersion=${currentBuild.number}_${branch}"
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    sh './build.sh'
+                }
+            }
+        }
+
+        stage('Container Image Scanning (Security)') {
+            // example using Aqua Scan
+            steps {
+                sh 'scancli -H http://aqua-server:8080 -U <SCAN_USER> -P <SCAN_PASSWORD> --local api-${env}:latest'
+            }
+        }
+
+        stage('Retag Docker Image') {  // using for backup docker image
+            steps {
+                script {
+                    sh 'docker tag api-${env}:latest api-${env}:${env.BUILD_NUMBER}'
+                    sh 'docker push api-${env}:${env.BUILD_NUMBER'
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            updateGitlabCommitStatus name: 'JenkinsCI', state: 'success'
+            emailext(attachLog: false,
+                body: 'Please check it out, link : $BUILD_URL',
+                subject: "SUCCESS :Job ${env.JOB_NAME} - Build# ${env.BUILD_NUMBER}",
+                to: "${email}")
+        }
+
+        failure {
+            updateGitlabCommitStatus name: 'JenkinsCI', state: 'failed'
+            emailext(attachLog: true,
+                body: 'Please check it out , link : $BUILD_URL',
+                subject: "FAILED :Job ${env.JOB_NAME} - Build# ${env.BUILD_NUMBER}",
+                to: "${email}")
+        }
+    }
+}
