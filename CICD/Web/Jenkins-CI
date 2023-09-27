@@ -51,7 +51,7 @@ pipeline {
                 sh './build.sh'
             }
         }
-        
+
         stage('Sonar Scan Code') {
             // example using Sonar to scan code
             steps {
