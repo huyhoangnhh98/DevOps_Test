@@ -47,3 +47,10 @@ resource "aws_s3_bucket_object" "error" {
   bucket  = aws_s3_bucket.website.id
   key     = var.error_page
 }
+
+resource "aws_s3_bucket_versioning" "enable_versioning" {
+  bucket = aws_s3_bucket.website.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
